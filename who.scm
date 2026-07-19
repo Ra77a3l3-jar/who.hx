@@ -1,12 +1,14 @@
 (require "helix/editor.scm")
 (require "helix/misc.scm")
+(require "helix/components.scm")
 (require "helix/static.scm")
 (require "helix/ext.scm")
 (require (prefix-in helix. "helix/commands.scm"))
-(require-builtin helix/core/text as text.)
 (require "notify/notify.scm")
 
-(provide who-toggle)
+(provide who-toggle
+         who-set-color!
+         who-set-style!)
 
 (define (who-info msg)
   (notify msg #:title "who.hx"))
@@ -14,6 +16,28 @@
 (define *who-enabled* #f)
 (define *who-hint-id* #f)
 (define *who-line* #f)
+(define *who-style* #f)
+
+;; falls back to the theme's inlay hint style when no custom style is set
+(define (who-hint-style)
+  (or *who-style* (theme-scope-ref "ui.virtual.inlay-hint")))
+
+(define (who-hex-byte hex start)
+  (string->number (substring hex start (+ start 2)) 16))
+
+;;@doc
+;; Set the blame hint color from a "#rrggbb" hex string
+(define (who-set-color! hex)
+  (set! *who-style*
+        (style-fg (theme-scope-ref "ui.text")
+                  (Color/rgb (who-hex-byte hex 1)
+                             (who-hex-byte hex 3)
+                             (who-hex-byte hex 5)))))
+
+;;@doc
+;; Set the full Style used for the blame hint
+(define (who-set-style! style)
+  (set! *who-style* style))
 
 (define (who-git-repo? dir)
   (let ([proc (~> (command "git" (list "-C" dir "rev-parse" "--is-inside-work-tree"))
@@ -71,14 +95,6 @@
      (define summary (who-commit-summary root sha))
      (and summary (string-append "  " summary))]))
 
-;; same char-index-of-end-of-line helper oil.hx uses for its inlay hints
-(define (who-line-end-char-index lines n)
-  (let loop ([i 0]
-             [pos 0])
-    (if (= i n)
-        (+ pos (string-length (list-ref lines i)))
-        (loop (+ i 1) (+ pos (string-length (list-ref lines i)) 1)))))
-
 (define (who-clear-hint!)
   (when *who-hint-id*
     (remove-inlay-hint-by-id (list-ref *who-hint-id* 0) (list-ref *who-hint-id* 1))
@@ -87,7 +103,8 @@
 ;; runs on a background thread so doesn slow the editor
 (define (who-update!)
   (define path (cx->current-file))
-  (define dir (get-helix-cwd))
+  ;; use the file's directory so blame works no matter where hx was launched from
+  (define dir (and path (parent-name path)))
   (cond
     [(not *who-enabled*) (who-clear-hint!)]
     [(not path) (who-clear-hint!)]
@@ -105,12 +122,12 @@
            (lambda ()
              ;; only apply if the cursor is still on this line
              (when (and hint (equal? line *who-line*))
-               (define rope (editor->text (editor->doc-id (editor-focus))))
-               (define lines (split-many (text.rope->string rope) "\n"))
-               (when (<= line (length lines))
-                 (define char-idx (who-line-end-char-index lines (- line 1)))
-                 (set! *who-hint-id* (add-inlay-hint char-idx hint))
-                 (helix.redraw))))))))]))
+               ;; line is 1 indexed, the hint API takes 0 indexed lines
+               (set! *who-hint-id*
+                     (add-styled-line-inlay-hint (- line 1)
+                                                 'end
+                                                 (list (list hint (who-hint-style)))))
+               (helix.redraw)))))))]))
 
 (register-hook 'selection-did-change (lambda (_view-id) (enqueue-thread-local-callback who-update!)))
 
