@@ -71,12 +71,12 @@
      (define summary (who-commit-summary root sha))
      (and summary (string-append "  " summary))]))
 
-;; same char-index-of-end-of-line helper oil.hx uses for its inlay hints
+;; Insert before the entire line ending, including CR in Windows CRLF files.
 (define (who-line-end-char-index lines n)
   (let loop ([i 0]
              [pos 0])
     (if (= i n)
-        (+ pos (string-length (list-ref lines i)))
+        (+ pos (string-length (trim-end-matches (list-ref lines i) "\r")))
         (loop (+ i 1) (+ pos (string-length (list-ref lines i)) 1)))))
 
 (define (who-clear-hint!)
